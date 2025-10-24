@@ -554,29 +554,35 @@ searchAccountBtn.onclick = async ()=>{
 };
 
 // Export CSV button (client-side builds CSV from loaded state)
-// Export CSV button (client-side builds CSV from MongoDB data)
 const exportBtn = document.createElement('button');
 exportBtn.textContent = 'Export All Data to CSV';
 exportBtn.style.marginTop = '15px';
-exportBtn.onclick = () => {
-  if (!GLOBAL_USERS || GLOBAL_USERS.length === 0) {
-    alert('No user data found to export.');
-    return;
-  }
-
-  let csv = 'Powerhouse,Feeder,Transformer,Pole,AccountID,AccountName,Phone,Remark\n';
-
-  GLOBAL_USERS.forEach(acc => {
-    csv += \`\${acc.powerhouse || ''},\${acc.feeder || ''},\${acc.transformer || ''},\${acc.pole || ''},\${acc.AccountID || ''},\${acc.AccountName || ''},\${acc.Phone || ''},"\${acc.Remark || ''}"\n\`;
+exportBtn.onclick = ()=>{
+  let csv = 'Powerhouse,Feeder,Transformer,Pole,AccountID,AccountName,Phone,Remark\\n';
+  state.data.powerhouses.forEach(ph=>{
+    (ph.feeders||[]).forEach(f=>{
+      (f.transformers||[]).forEach(t=>{
+        (t.poles||[]).forEach(p=>{
+          const accounts = (ph.accounts||[]).filter(a => 
+            a.powerhouse===ph.name && a.feeder===f.name && a.transformer===t.name && a.pole===p.name
+          );
+          if(accounts.length>0){
+            accounts.forEach(acc=>{
+              csv+=\`\${ph.name},\${f.name},\${t.name},\${p.name},\${acc.id},\${acc.name},\${acc.phone},"\\\${acc.remark || ''}"\\n\`;
+            });
+          } else {
+            csv+=\`\${ph.name},\${f.name},\${t.name},\${p.name},,,,\n\`;
+          }
+        });
+      });
+    });
   });
-
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const blob = new Blob([csv],{type:'text/csv'});
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
   link.download = 'powerhouse_data.csv';
   link.click();
 };
-
 
 function renderUsers(){
   const userListDiv = document.getElementById('userListDiv');
