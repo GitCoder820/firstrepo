@@ -14,55 +14,55 @@ const MONGO_URL = "mongodb+srv://rjvermasdomm_db_user:wClS1ErdUFWNNkuq@cluster0.
 // ----------------- Mongoose Models -----------------
 mongoose.set('strictQuery', false);
 mongoose.connect(MONGO_URL, { useNewUrlParser: true, useUnifiedTopology: true })
-    .then(() => console.log('Connected to MongoDB Atlas'))
-    .catch(err => {
-        console.error('Mongo connection error:', err);
-        process.exit(1);
-    });
+  .then(() => console.log('Connected to MongoDB Atlas'))
+  .catch(err => {
+    console.error('Mongo connection error:', err);
+    process.exit(1);
+  });
 
 const userSchema = new mongoose.Schema({
-    username: { type: String, required: true, unique: true },
-    password: String,
-    role: String,
-    powerhouse: String
+  username: { type: String, required: true, unique: true },
+  password: String,
+  role: String,
+  powerhouse: String
 });
 const User = mongoose.model('User', userSchema);
 
 const poleSchema = new mongoose.Schema({ name: String }, { _id: false });
 const transformerSchema = new mongoose.Schema({
-    name: String,
-    poles: [poleSchema]
+  name: String,
+  poles: [poleSchema]
 }, { _id: false });
 const feederSchema = new mongoose.Schema({
-    name: String,
-    transformers: [transformerSchema]
+  name: String,
+  transformers: [transformerSchema]
 }, { _id: false });
 
 const accountSchema = new mongoose.Schema({
-    id: String,
-    name: String,
-    phone: String,
-    powerhouse: String,
-    feeder: String,
-    transformer: String,
-    pole: String,
-    remark: String
+  id: String,
+  name: String,
+  phone: String,
+  powerhouse: String,
+  feeder: String,
+  transformer: String,
+  pole: String,
+  remark: String
 }, { _id: false });
 
 const powerhouseSchema = new mongoose.Schema({
-    name: { type: String, required: true, unique: true },
-    feeders: [feederSchema],
-    accounts: [accountSchema]
+  name: { type: String, required: true, unique: true },
+  feeders: [feederSchema],
+  accounts: [accountSchema]
 });
 const Powerhouse = mongoose.model('Powerhouse', powerhouseSchema);
 
 // Ensure default admin exists on startup
 async function ensureAdmin() {
-    const admin = await User.findOne({ username: 'admin' });
-    if (!admin) {
-        await User.create({ username: 'admin', password: 'admin123', role: 'admin', powerhouse: null });
-        console.log('Default admin user created: admin / admin123');
-    }
+  const admin = await User.findOne({ username: 'admin' });
+  if (!admin) {
+    await User.create({ username: 'admin', password: 'admin123', role: 'admin', powerhouse: null });
+    console.log('Default admin user created: admin / admin123');
+  }
 }
 ensureAdmin();
 
@@ -71,7 +71,7 @@ app.use(bodyParser.json());
 
 // Serve the single HTML page
 app.get('/', (req, res) => {
-    res.send(`<!doctype html>
+  res.send(`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -122,6 +122,9 @@ h3,h4{margin-top:15px;color:#2e7d32;}
       <div id="hierarchySection"></div>
       <hr>
       <div id="userListDiv"></div>
+      <button onclick="window.location.href='/api/exportAccounts'">
+  Download CSV
+</button>
     </div>
 
     <!-- User Panel -->
@@ -554,9 +557,11 @@ searchAccountBtn.onclick = async ()=>{
 };
 
 // Export CSV button (client-side builds CSV from loaded state)
+
+
 const exportBtn = document.createElement('button');
-exportBtn.textContent = 'Export All Data to CSV';
-exportBtn.style.marginTop = '15px';
+exportBtn.textContent = 'dont click';
+exportBtn.style.display = 'none';
 exportBtn.onclick = ()=>{
   let csv = 'Powerhouse,Feeder,Transformer,Pole,AccountID,AccountName,Phone,Remark\\n';
   state.data.powerhouses.forEach(ph=>{
@@ -634,107 +639,131 @@ document.addEventListener('DOMContentLoaded', async ()=>{ await loadFromServer()
 // ----------------- API Endpoints -----------------
 
 // Load all users and powerhouses
+
+// ----------------- EXPORT ACCOUNTS TO CSV -----------------
+app.get('/api/exportAccounts', async (req, res) => {
+  try {
+    const powerhouses = await Powerhouse.find({}).lean();
+
+    let csv = 'Powerhouse,Feeder,Transformer,Pole,AccountID,AccountName,Phone,Remark\n';
+
+    powerhouses.forEach(ph => {
+      (ph.accounts || []).forEach(acc => {
+        csv += `${acc.powerhouse || ph.name},${acc.feeder || ''},${acc.transformer || ''},${acc.pole || ''},${acc.id || ''},${acc.name || ''},${acc.phone || ''},"${acc.remark || ''}"\n`;
+      });
+    });
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="accounts.csv"');
+    res.send(csv);
+  } catch (err) {
+    console.error('CSV export failed:', err);
+    res.status(500).send('Error generating CSV file');
+  }
+});
+
+
 app.get('/api/loadAll', async (req, res) => {
-    try {
-        const users = await User.find({}).sort({ username: 1 }).lean();
-        const powerhouses = await Powerhouse.find({}).sort({ name: 1 }).lean();
-        res.json({ users, powerhouses });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'load failed' });
-    }
+  try {
+    const users = await User.find({}).sort({ username: 1 }).lean();
+    const powerhouses = await Powerhouse.find({}).sort({ name: 1 }).lean();
+    res.json({ users, powerhouses });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'load failed' });
+  }
 });
 
 // Save all users and powerhouses (replace collections)
 app.post('/api/saveAll', async (req, res) => {
-    try {
-        const { users, powerhouses } = req.body;
-        if (!Array.isArray(users) || !Array.isArray(powerhouses)) {
-            return res.status(400).json({ error: 'Invalid payload' });
-        }
-
-        // Replace users collection
-        await User.deleteMany({});
-        if (users.length) {
-            // ensure unique usernames: Mongo will enforce unique but we prevent server error by filtering duplicates
-            const uniqueUsers = [];
-            const seen = new Set();
-            users.forEach(u => {
-                if (u.username && !seen.has(u.username)) {
-                    seen.add(u.username);
-                    uniqueUsers.push(u);
-                }
-            });
-            if (uniqueUsers.length) await User.insertMany(uniqueUsers);
-        }
-
-        // Replace powerhouses collection
-        await Powerhouse.deleteMany({});
-        if (powerhouses.length) {
-            // Keep only necessary fields and ensure array structure
-            const cleaned = powerhouses.map(ph => ({
-                name: ph.name,
-                feeders: ph.feeders || [],
-                accounts: ph.accounts || []
-            }));
-            if (cleaned.length) await Powerhouse.insertMany(cleaned);
-        }
-
-        res.json({ ok: true });
-    } catch (err) {
-        console.error('saveAll error', err);
-        res.status(500).json({ error: 'save failed' });
+  try {
+    const { users, powerhouses } = req.body;
+    if (!Array.isArray(users) || !Array.isArray(powerhouses)) {
+      return res.status(400).json({ error: 'Invalid payload' });
     }
+
+    // Replace users collection
+    await User.deleteMany({});
+    if (users.length) {
+      // ensure unique usernames: Mongo will enforce unique but we prevent server error by filtering duplicates
+      const uniqueUsers = [];
+      const seen = new Set();
+      users.forEach(u => {
+        if (u.username && !seen.has(u.username)) {
+          seen.add(u.username);
+          uniqueUsers.push(u);
+        }
+      });
+      if (uniqueUsers.length) await User.insertMany(uniqueUsers);
+    }
+
+    // Replace powerhouses collection
+    await Powerhouse.deleteMany({});
+    if (powerhouses.length) {
+      // Keep only necessary fields and ensure array structure
+      const cleaned = powerhouses.map(ph => ({
+        name: ph.name,
+        feeders: ph.feeders || [],
+        accounts: ph.accounts || []
+      }));
+      if (cleaned.length) await Powerhouse.insertMany(cleaned);
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('saveAll error', err);
+    res.status(500).json({ error: 'save failed' });
+  }
 });
 
 // Login endpoint
 app.post('/api/login', async (req, res) => {
-    try {
-        const { username, password } = req.body;
-        if (!username || !password) return res.json({ success: false, msg: 'Missing credentials' });
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) return res.json({ success: false, msg: 'Missing credentials' });
 
-        const user = await User.findOne({ username: username }).lean();
-        if (!user) return res.json({ success: false, msg: 'Invalid credentials' });
-        if (user.password !== password) return res.json({ success: false, msg: 'Invalid credentials' });
+    const user = await User.findOne({ username: username }).lean();
+    if (!user) return res.json({ success: false, msg: 'Invalid credentials' });
+    if (user.password !== password) return res.json({ success: false, msg: 'Invalid credentials' });
 
-        // return user doc (without sensitive fields beyond password which we keep as-is here)
-        res.json({ success: true, user });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, msg: 'login error' });
-    }
+    // return user doc (without sensitive fields beyond password which we keep as-is here)
+    res.json({ success: true, user });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, msg: 'login error' });
+  }
 });
 
 // Search account by powerhouse & id
 app.get('/api/searchAccount/:powerhouse/:id', async (req, res) => {
-    try {
-        const phname = req.params.powerhouse;
-        const id = req.params.id;
-        if (!phname || !id) return res.json({ found: false });
+  try {
+    const phname = req.params.powerhouse;
+    const id = req.params.id;
+    if (!phname || !id) return res.json({ found: false });
 
-        const ph = await Powerhouse.findOne({ name: phname }).lean();
-        if (!ph || !ph.accounts) return res.json({ found: false });
-        const acc = ph.accounts.find(a => a.id === id);
-        if (!acc) return res.json({ found: false });
-        res.json({ found: true, account: acc });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ found: false });
-    }
+    const ph = await Powerhouse.findOne({ name: phname }).lean();
+    if (!ph || !ph.accounts) return res.json({ found: false });
+    const acc = ph.accounts.find(a => a.id === id);
+    if (!acc) return res.json({ found: false });
+    res.json({ found: true, account: acc });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ found: false });
+  }
 });
 
 // Basic CRUD helpers (not used by client heavily, but available)
 app.get('/api/users', async (req, res) => {
-    const users = await User.find({}).lean();
-    res.json(users);
+  const users = await User.find({}).lean();
+  res.json(users);
 });
 
 app.get('/api/powerhouses', async (req, res) => {
-    const powerhouses = await Powerhouse.find({}).lean();
-    res.json(powerhouses);
+  const powerhouses = await Powerhouse.find({}).lean();
+  res.json(powerhouses);
 });
 
 // Start server
 app.listen(PORT, () => {
-    console.log('Server running at http://localhost:' + PORT);
+  console.log('Server running at http://localhost:' + PORT);
 });
